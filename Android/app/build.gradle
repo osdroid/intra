@@ -37,12 +37,6 @@ repositories {
     maven {
         url 'test-repo'
     }
-    maven {
-        url '../gradle-plugin-repo'
-    }
-    maven {
-        url '../firebase-repo'
-    }
 }
 
 dependencies {
@@ -65,12 +59,4 @@ dependencies {
     implementation 'androidx.legacy:legacy-preference-v14:1.0.0-rc01'
     implementation 'androidx.recyclerview:recyclerview:1.0.0-rc01'
     implementation 'androidx.constraintlayout:constraintlayout:1.1.2'
-
-    // For Firebase Analytics, etc.
-    implementation 'com.google.firebase:firebase-core:16.0.1'
-    implementation 'com.google.firebase:firebase-perf:16.1.0'
-    implementation 'com.google.firebase:firebase-crash:16.0.1'
 }
-// For Firebase Analytics
-apply plugin: 'com.google.gms.google-services'
-apply plugin: 'com.google.firebase.firebase-perf'
