@@ -1,3 +1,15 @@
+# My Mods
+
+Wouldn't it be cool to have a site blocker, plus your dns lookups protected
+at the same time? That's what my fork is all about. I intend it mostly for
+me, but well, it started open source, so let's leave it open source! :)
+
+I also plan to add some sites that can be temporarily unblocked, maybe allowing
+me a given time per day to access them! (yes, I'm looking at you news sites!).
+And even an "all access mode" just in case I plan to do buy something with the phone.
+
+---
+
 # Intra
 
 Intra is an experimental tool that allows you to test new DNS-over-HTTPS
@@ -14,6 +26,12 @@ Features:
 ## Android build instructions
 
 1. Clone this repo.
-2. Open the `Android/` directory in Android Studio 3.0 or later.
-3. Connect your phone
-4. Click the green "play" triangle button.
+2. Add the keystore.properties file under the Android directory
+   The format is like this (just add the information of your android key):  
+   keyAlias=  
+   keyPassword=  
+   storeFile=  
+   storePassword=  
+3. Open the `Android/` directory in Android Studio 3.0 or later.
+4. Connect your phone
+5. Click the green "play" triangle button.
