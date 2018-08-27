@@ -8,6 +8,8 @@ I also plan to add some sites that can be temporarily unblocked, maybe allowing
 me a given time per day to access them! (yes, I'm looking at you news sites!).
 And even an "all access mode" just in case I plan to do buy something with the phone.
 
+Finally, make it really easy to block new sites from the "recent queries" list.
+
 ---
 
 # Intra
@@ -27,6 +29,7 @@ Features:
 
 1. Clone this repo.
 2. Add the keystore.properties file under the Android directory
+
    The format is like this (just add the information of your android key):  
    keyAlias=  
    keyPassword=  
