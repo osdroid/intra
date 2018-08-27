@@ -52,6 +52,7 @@ import java.util.HashMap;
 import java.util.List;
 
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+import app.intra.util.BlockedSites;
 import app.intra.util.DnsQueryTracker;
 import app.intra.util.DnsTransaction;
 import app.intra.util.Names;
@@ -237,6 +238,7 @@ public class DnsVpnService extends VpnService implements NetworkManager.NetworkL
 
     updateServerConnection();
 
+    BlockedSites.loadSites(false);
     tunFd = establishVpn();
     if (tunFd == null) {
       FirebaseCrash.logcat(Log.WARN, LOG_TAG, "Failed to get TUN device");

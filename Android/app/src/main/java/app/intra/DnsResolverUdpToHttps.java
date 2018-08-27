@@ -31,9 +31,11 @@ import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+import app.intra.util.BlockedSites;
 import app.intra.util.DnsMetadata;
 import app.intra.util.DnsPacket;
 import app.intra.util.DnsTransaction;
+import app.intra.util.DummyDnsPacket;
 import app.intra.util.IpPacket;
 import app.intra.util.IpTagInterceptor;
 import app.intra.util.Ipv4Packet;
@@ -174,8 +176,15 @@ public class DnsResolverUdpToHttps extends Thread {
         dnsRequest.sourcePort = udpPacket.destPort;
         dnsRequest.destPort = udpPacket.sourcePort;
 
-        serverConnection.performDnsRequest(dnsRequest, udpPacket.data,
-            new DnsResponseCallback(dnsRequest, out));
+        BlockedSites.Category category = BlockedSites
+                .getUrlCategory(dnsRequest.name);
+        if (category == BlockedSites.Category.UNKNOWN) {
+          serverConnection.performDnsRequest(dnsRequest, udpPacket.data,
+                  new DnsResponseCallback(dnsRequest, out));
+        } else {
+          new DnsResponseCallback(dnsRequest, out)
+                  .processResponse(DummyDnsPacket.generate(dnsRequest.name));
+        }
 
         Intent intent = new Intent(Names.QUERY.name());
         DnsVpnService dnsVpnService = DnsVpnServiceState.getInstance().getDnsVpnService();
@@ -309,6 +318,9 @@ public class DnsResolverUdpToHttps extends Thread {
         sendResult();
         return;
       }
+      processResponse(dnsResponse);
+    }
+    private void processResponse(byte[] dnsResponse) {
       writeRequestIdToDnsResponse(dnsResponse, dnsMetadata.requestId);
       DnsMetadata parsedDnsResponse = parseDnsPacket(dnsResponse);
       if (parsedDnsResponse != null) {
