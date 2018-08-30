@@ -17,6 +17,7 @@ package app.intra;
 
 import com.google.firebase.crash.FirebaseCrash;
 
+import android.content.Context;
 import android.content.Intent;
 import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
@@ -30,9 +31,11 @@ import java.net.ProtocolException;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import app.intra.util.BlockedSites;
-import app.intra.util.DnsMetadata;
+import app.intra.util.DnsUdpQuery;
 import app.intra.util.DnsPacket;
 import app.intra.util.DnsTransaction;
 import app.intra.util.DummyDnsPacket;
@@ -72,11 +75,14 @@ public class DnsResolverUdpToHttps extends Thread {
   // Misc constants
   private static final int SLEEP_MILLIS = 1500;
 
+  private final @NonNull DnsVpnService vpnService;
   private ParcelFileDescriptor tunFd = null;
-  public ServerConnection serverConnection = null;
+  @Nullable ServerConnection serverConnection = null;
 
-  public DnsResolverUdpToHttps(ParcelFileDescriptor tunFd, ServerConnection serverConnection) {
+  DnsResolverUdpToHttps(@NonNull DnsVpnService vpnService, ParcelFileDescriptor tunFd,
+                        ServerConnection serverConnection) {
     super(LOG_TAG);
+    this.vpnService = vpnService;
     this.tunFd = tunFd;
     this.serverConnection = serverConnection;
   }
@@ -157,7 +163,7 @@ public class DnsResolverUdpToHttps extends Thread {
           continue;
         }
 
-        DnsMetadata dnsRequest = parseDnsPacket(udpPacket.data);
+        DnsUdpQuery dnsRequest = parseDnsPacket(udpPacket.data);
         if (dnsRequest == null) {
           FirebaseCrash.logcat(Log.ERROR, LOG_TAG, "Failed to parse DNS request");
           continue;
@@ -179,17 +185,18 @@ public class DnsResolverUdpToHttps extends Thread {
         BlockedSites.Category category = BlockedSites
                 .getUrlCategory(dnsRequest.name);
         if (category == BlockedSites.Category.UNKNOWN) {
-          serverConnection.performDnsRequest(dnsRequest, udpPacket.data,
-                  new DnsResponseCallback(dnsRequest, out));
+          try {
+            serverConnection.performDnsRequest(dnsRequest, udpPacket.data,
+                    new DnsResponseCallback(dnsRequest, out));
+          } catch (NullPointerException e) {
+            DnsTransaction transaction = new DnsTransaction(dnsRequest);
+            transaction.status = DnsTransaction.Status.SEND_FAIL;
+            sendResult(transaction);
+          }
         } else {
           new DnsResponseCallback(dnsRequest, out)
                   .processResponse(DummyDnsPacket.generate(dnsRequest.name));
         }
-
-        Intent intent = new Intent(Names.QUERY.name());
-        DnsVpnService dnsVpnService = DnsVpnServiceState.getInstance().getDnsVpnService();
-        LocalBroadcastManager.getInstance(dnsVpnService).sendBroadcast(intent);
-
       } catch (Exception e) {
         if (!isInterrupted()) {
           FirebaseCrash.logcat(Log.WARN, LOG_TAG, "Unexpected exception in UDP loop.");
@@ -205,11 +212,11 @@ public class DnsResolverUdpToHttps extends Thread {
     buffer.putShort(dnsRequestId);
   }
 
-  // Returns the question name, type, and id  present in |dnsPacket|, as a DnsMetadata object.
+  // Returns the question name, type, and id  present in |dnsPacket|, as a DnsUdpQuery object.
   // Assumes the DNS packet has been validated.
-  private DnsMetadata parseDnsPacket(byte[] data) {
-    DnsMetadata dnsMetadata = new DnsMetadata();
-    dnsMetadata.timestamp = SystemClock.elapsedRealtime();
+  private DnsUdpQuery parseDnsPacket(byte[] data) {
+    DnsUdpQuery dnsUdpQuery = new DnsUdpQuery();
+    dnsUdpQuery.timestamp = SystemClock.elapsedRealtime();
 
     DnsPacket dnsPacket;
     try {
@@ -223,15 +230,15 @@ public class DnsResolverUdpToHttps extends Thread {
       return null;
     }
 
-    dnsMetadata.type = dnsPacket.getQueryType();
-    dnsMetadata.name = dnsPacket.getQueryName();
-    if (dnsMetadata.name == null || dnsMetadata.type == 0) {
+    dnsUdpQuery.type = dnsPacket.getQueryType();
+    dnsUdpQuery.name = dnsPacket.getQueryName();
+    if (dnsUdpQuery.name == null || dnsUdpQuery.type == 0) {
       FirebaseCrash.logcat(Log.INFO, LOG_TAG, "No question in DNS packet");
       return null;
     }
-    dnsMetadata.requestId = dnsPacket.getId();
+    dnsUdpQuery.requestId = dnsPacket.getId();
 
-    return dnsMetadata;
+    return dnsUdpQuery;
   }
 
   // Returns an error string for unexpected, non-UDP protocols.
@@ -252,6 +259,16 @@ public class DnsResolverUdpToHttps extends Thread {
     return msg;
   }
 
+  private void sendResult(DnsTransaction transaction) {
+    vpnService.recordTransaction(transaction);
+    DnsVpnController controller = DnsVpnController.getInstance();
+    if (transaction.status == DnsTransaction.Status.COMPLETE) {
+      controller.onConnectionStateChanged(vpnService, ServerConnection.State.WORKING);
+    } else {
+      controller.onConnectionStateChanged(vpnService, ServerConnection.State.FAILING);
+    }
+  }
+
   /**
    * A callback object to listen for a DNS response. The caller should create one such object for
    * each DNS request. Responses will run on a reader thread owned by OkHttp.
@@ -259,7 +276,7 @@ public class DnsResolverUdpToHttps extends Thread {
   private class DnsResponseCallback implements Callback {
 
     private final FileOutputStream outputStream;
-    private final DnsMetadata dnsMetadata;
+    private final DnsUdpQuery dnsUdpQuery;
     private final DnsTransaction transaction;
 
     /**
@@ -269,18 +286,10 @@ public class DnsResolverUdpToHttps extends Thread {
      * port.
      * @param output Represents the VPN TUN device.
      */
-    public DnsResponseCallback(DnsMetadata request, FileOutputStream output) {
-      dnsMetadata = request;
+    public DnsResponseCallback(DnsUdpQuery request, FileOutputStream output) {
+      dnsUdpQuery = request;
       outputStream = output;
-      transaction = makeTransaction(request);
-    }
-
-    private DnsTransaction makeTransaction(DnsMetadata query) {
-      DnsTransaction transaction = new DnsTransaction();
-      transaction.name = query.name;
-      transaction.queryTime = query.timestamp;
-      transaction.type = query.type;
-      return transaction;
+      transaction = new DnsTransaction(request);
     }
 
     @Override
@@ -289,17 +298,14 @@ public class DnsResolverUdpToHttps extends Thread {
       FirebaseCrash.logcat(Log.WARN, LOG_TAG, "Failed to read HTTPS response: " + e.toString());
       if (e instanceof SocketTimeoutException) {
         FirebaseCrash.logcat(Log.WARN, LOG_TAG, "Workaround for OkHttp3 #3146: resetting");
-        serverConnection.reset();
+        try {
+          serverConnection.reset();
+        } catch (NullPointerException npe) {
+          FirebaseCrash.logcat(Log.WARN, LOG_TAG,
+              "Unlikely race: Null server connection at reset.");
+        }
       }
-    }
-
-    private void sendResult() {
-      DnsVpnService dnsVpnService = DnsVpnServiceState.getInstance().getDnsVpnService();
-      if (dnsVpnService != null) {
-        dnsVpnService.recordTransaction(transaction);
-      } else {
-        FirebaseCrash.logcat(Log.INFO, LOG_TAG, "VPN service was gone when result arrived.");
-      }
+      sendResult(transaction);
     }
 
     @Override
@@ -307,7 +313,7 @@ public class DnsResolverUdpToHttps extends Thread {
       transaction.serverIp = response.header(IpTagInterceptor.HEADER_NAME);
       if (!response.isSuccessful()) {
         transaction.status = DnsTransaction.Status.HTTP_ERROR;
-        sendResult();
+        sendResult(transaction);
         return;
       }
       byte[] dnsResponse;
@@ -315,20 +321,20 @@ public class DnsResolverUdpToHttps extends Thread {
         dnsResponse = response.body().bytes();
       } catch (IOException e) {
         transaction.status = DnsTransaction.Status.BAD_RESPONSE;
-        sendResult();
+        sendResult(transaction);
         return;
       }
       processResponse(dnsResponse);
     }
     private void processResponse(byte[] dnsResponse) {
-      writeRequestIdToDnsResponse(dnsResponse, dnsMetadata.requestId);
-      DnsMetadata parsedDnsResponse = parseDnsPacket(dnsResponse);
+      writeRequestIdToDnsResponse(dnsResponse, dnsUdpQuery.requestId);
+      DnsUdpQuery parsedDnsResponse = parseDnsPacket(dnsResponse);
       if (parsedDnsResponse != null) {
-        Log.d(LOG_TAG, "RNAME: " + parsedDnsResponse.name + " NAME: " + dnsMetadata.name);
-        if (!dnsMetadata.name.equals(parsedDnsResponse.name)) {
+        Log.d(LOG_TAG, "RNAME: " + parsedDnsResponse.name + " NAME: " + dnsUdpQuery.name);
+        if (!dnsUdpQuery.name.equals(parsedDnsResponse.name)) {
           FirebaseCrash.logcat(Log.ERROR, LOG_TAG, "Mismatch in request and response names.");
           transaction.status = DnsTransaction.Status.BAD_RESPONSE;
-          sendResult();
+          sendResult(transaction);
           return;
         }
       }
@@ -337,21 +343,21 @@ public class DnsResolverUdpToHttps extends Thread {
       transaction.response = dnsResponse;
 
       UdpPacket udpResponsePacket =
-          new UdpPacket(dnsMetadata.sourcePort, dnsMetadata.destPort, dnsResponse);
+          new UdpPacket(dnsUdpQuery.sourcePort, dnsUdpQuery.destPort, dnsResponse);
       byte[] rawUdpResponse = udpResponsePacket.getRawPacket();
 
       IpPacket ipPacket;
-      if (dnsMetadata.sourceAddress instanceof Inet4Address) {
+      if (dnsUdpQuery.sourceAddress instanceof Inet4Address) {
         ipPacket = new Ipv4Packet(
             UDP_PROTOCOL,
-            dnsMetadata.sourceAddress,
-            dnsMetadata.destAddress,
+            dnsUdpQuery.sourceAddress,
+            dnsUdpQuery.destAddress,
             rawUdpResponse);
       } else {
         ipPacket = new Ipv6Packet(
             UDP_PROTOCOL,
-            dnsMetadata.sourceAddress,
-            dnsMetadata.destAddress,
+            dnsUdpQuery.sourceAddress,
+            dnsUdpQuery.destAddress,
             rawUdpResponse);
       }
 
@@ -364,7 +370,7 @@ public class DnsResolverUdpToHttps extends Thread {
         transaction.status = DnsTransaction.Status.INTERNAL_ERROR;
       }
 
-      sendResult();
+      sendResult(transaction);
     }
   }
 }
