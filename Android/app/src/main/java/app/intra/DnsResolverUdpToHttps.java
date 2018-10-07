@@ -60,7 +60,7 @@ class DnsResolverUdpToHttps {
       try {
         new DnsResolverUdpToHttps.DnsResponseCallback(
                 serverConnection, query, responseWriter)
-                .processResponse(DummyDnsPacket.generate(query.name));
+                .processResponse(DummyDnsPacket.generate(query.name), true);
       } catch(ProtocolException e) {
         DnsTransaction transaction = new DnsTransaction(query);
         transaction.status = DnsTransaction.Status.SEND_FAIL;
@@ -146,9 +146,9 @@ class DnsResolverUdpToHttps {
         transaction.status = DnsTransaction.Status.BAD_RESPONSE;
         return;
       }
-      processResponse(dnsResponse);
+      processResponse(dnsResponse, false);
     }
-    private void processResponse(byte[] dnsResponse) {
+    private void processResponse(byte[] dnsResponse, boolean sendResult) {
       try {
         writeRequestIdToDnsResponse(dnsResponse, dnsUdpQuery.requestId);
       } catch (BufferOverflowException e) {
@@ -168,6 +168,8 @@ class DnsResolverUdpToHttps {
 
       transaction.status = DnsTransaction.Status.COMPLETE;
       transaction.response = dnsResponse;
+      if (sendResult)
+        sendResult();
     }
 
     @Override
