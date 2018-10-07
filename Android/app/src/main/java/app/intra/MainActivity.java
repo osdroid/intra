@@ -38,8 +38,6 @@ import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.SystemClock;
-import android.text.Html;
-import android.text.Spanned;
 import android.text.method.LinkMovementMethod;
 import android.util.Log;
 import android.view.Gravity;
@@ -52,8 +50,8 @@ import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.Switch;
 import android.widget.TextView;
-import android.widget.ToggleButton;
 
 import java.net.InetAddress;
 import java.net.NetworkInterface;
@@ -77,7 +75,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import app.intra.util.DnsQueryTracker;
 import app.intra.util.DnsTransaction;
-import app.intra.util.Feedback;
+import app.intra.util.HistoryGraph;
 import app.intra.util.Names;
 
 public class MainActivity extends AppCompatActivity
@@ -197,8 +195,8 @@ public class MainActivity extends AppCompatActivity
           case R.id.settings:
             chooseView(R.id.settings);
             return true;
-          case R.id.report_error:
-            chooseView(R.id.frame_report);
+          case R.id.support:
+            openUrl("https://getintra.org/help");
             return true;
           case R.id.privacy:
             openUrl("https://developers.google.com/speed/public-dns/privacy");
@@ -229,22 +227,6 @@ public class MainActivity extends AppCompatActivity
     intentFilter.addAction(Names.DNS_STATUS.name());
     LocalBroadcastManager.getInstance(this).registerReceiver(messageReceiver, intentFilter);
 
-    // Connect error report button
-    Button errorButton = (Button) findViewById(R.id.feedbackButton);
-    errorButton.setOnClickListener(new View.OnClickListener() {
-      @Override
-      public void onClick(View view) {
-        // Send user feedback to Crashlytics
-        EditText userErrorReport = (EditText) findViewById(R.id.feedbackContent);
-        String userMessage = userErrorReport.getText().toString();
-        FirebaseCrash.logcat(Log.INFO, LOG_TAG, userMessage);
-        FirebaseCrash.report(new Feedback("User feedback"));
-
-        // Go back to the home screen
-        chooseView(R.id.frame_main);
-      }
-    });
-
     prepareHyperlinks(this, findViewById(R.id.activity_main));
 
     // Autostart if necessary
@@ -265,7 +247,7 @@ public class MainActivity extends AppCompatActivity
         false);
 
     // Set up the main UI
-    final ToggleButton switchButton = (ToggleButton) controlView.findViewById(R.id.dns_switch);
+    final Switch switchButton = controlView.findViewById(R.id.dns_switch);
     syncDnsStatus();
     switchButton.setOnCheckedChangeListener(
         new CompoundButton.OnCheckedChangeListener() {
@@ -508,14 +490,18 @@ public class MainActivity extends AppCompatActivity
   }
 
   private boolean isAnotherVpnActive() {
-    ConnectivityManager connectivityManager =
-        (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
     if (VERSION.SDK_INT >= VERSION_CODES.M) {
+      ConnectivityManager connectivityManager =
+          (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
       Network activeNetwork = connectivityManager.getActiveNetwork();
       if (activeNetwork == null) {
         return false;
       }
       NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(activeNetwork);
+      if (capabilities == null) {
+        // It's not clear when this can happen, but it has occurred for at least one user.
+        return false;
+      }
       return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
     }
     // For pre-M versions, return true if there's any network whose name looks like a VPN.
@@ -550,73 +536,73 @@ public class MainActivity extends AppCompatActivity
 
     DnsVpnState status = DnsVpnController.getInstance().getState(this);
 
-    // Change toggle button text
-    final ToggleButton switchButton = (ToggleButton) controlView.findViewById(R.id.dns_switch);
+    // Change switch-button state
+    final Switch switchButton = controlView.findViewById(R.id.dns_switch);
     switchButton.setChecked(status.activationRequested);
-    if (status.on) {
-      switchButton.setText(R.string.disable_protection);
-    } else if (status.activationRequested) {
-      switchButton.setText(R.string.starting_protection);
-    } else {
-      switchButton.setText(R.string.enable_protection);
-    }
-
-    // Show/hide graph
-    View graph = controlView.findViewById(R.id.graph);
-    graph.setVisibility(status.on ? View.VISIBLE : View.INVISIBLE);
 
     // Change indicator text
     final TextView indicatorText = controlView.findViewById(R.id.indicator);
-    int colorId = status.on ? R.color.accent_good : R.color.accent_bad;
-    int color = ContextCompat.getColor(this, colorId);
+    indicatorText.setText(status.activationRequested ? R.string.indicator_on : R.string.indicator_off);
 
+    // Change status and explanation text
+    final int statusId;
+    final int explanationId;
     PrivateDnsMode privateDnsMode = PrivateDnsMode.NONE;
-    int templateId;
-    if (status.on) {
-      templateId = R.string.dns_on;
+    if (status.activationRequested) {
+      if (status.connectionState == null) {
+        statusId = R.string.status_waiting;
+        explanationId = R.string.explanation_offline;
+      } else if (status.connectionState == ServerConnection.State.NEW) {
+        statusId = R.string.status_starting;
+        explanationId = R.string.explanation_starting;
+      } else if (status.connectionState == ServerConnection.State.WORKING) {
+        statusId = R.string.status_protected;
+        explanationId = R.string.explanation_protected;
+      } else {
+        // status.connectionState == ServerConnection.State.FAILING
+        statusId = R.string.status_protected;
+        explanationId = R.string.explanation_failing;
+      }
+    } else if (isAnotherVpnActive()) {
+      statusId = R.string.status_exposed;
+      explanationId = R.string.explanation_vpn;
     } else {
       privateDnsMode = getPrivateDnsMode();
       if (privateDnsMode == PrivateDnsMode.STRICT) {
-        templateId = R.string.dns_strict;
+        statusId = R.string.status_strict;
+        explanationId = R.string.explanation_strict;
       } else if (privateDnsMode == PrivateDnsMode.UPGRADED) {
-        templateId = R.string.dns_upgraded;
+        statusId = R.string.status_upgraded;
+        explanationId = R.string.explanation_upgraded;
       } else {
-        templateId = R.string.dns_off;
+        statusId = R.string.status_exposed;
+        explanationId = R.string.explanation_exposed;
       }
     }
 
-    String template = getResources().getText(templateId).toString();
-    // Html.fromHtml only supports RGB, not ARGB, so mask off the alpha byte.
-    String html = String.format(template, color & 0xFFFFFF);
-    Spanned text;
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-      text = Html.fromHtml(html, 0);
+    final int colorId;
+    if (status.on) {
+      colorId = R.color.accent_good;
+    } else if (privateDnsMode == PrivateDnsMode.STRICT) {
+      // If the VPN is off but we're in strict mode, show the status in white.  This isn't a bad
+      // state, but Intra isn't helping.
+      colorId = R.color.indicator;
     } else {
-      text = Html.fromHtml(html);
+      colorId = R.color.accent_bad;
     }
-    indicatorText.setText(text);
 
-    // Change graph backdrop tint.
+    final TextView statusText = controlView.findViewById(R.id.status);
+    final TextView explanationText = controlView.findViewById(R.id.explanation);
+    final int color = ContextCompat.getColor(this, colorId);
+    statusText.setTextColor(color);
+    statusText.setText(statusId);
+    explanationText.setText(explanationId);
+
+    // Change graph foreground and background tint.
+    HistoryGraph graph = controlView.findViewById(R.id.graph);
+    graph.setColor(color);
     ImageView backdrop = controlView.findViewById(R.id.graph_backdrop);
     backdrop.setColorFilter(color, PorterDuff.Mode.SRC_ATOP);
-
-    // Set detailed status text.
-    final TextView detailedStatusText = controlView.findViewById(R.id.detailed_status);
-    if (status.on) {
-      if (status.connectionState == null) {
-        detailedStatusText.setText(R.string.offline);
-      } else {
-        detailedStatusText.setText(status.connectionState.message());
-      }
-    } else {
-      if (isAnotherVpnActive()) {
-        detailedStatusText.setText(R.string.vpn_explanation);
-      } else if (privateDnsMode == PrivateDnsMode.STRICT) {
-        detailedStatusText.setText(R.string.dns_strict_explanation);
-      } else {
-        detailedStatusText.setText("");
-      }
-    }
 
     // Show/hide secure/insecure details
     View systemDetails = controlView.findViewById(R.id.system_details);
@@ -650,7 +636,7 @@ public class MainActivity extends AppCompatActivity
 
   private void showSettings() {
     SettingsFragment fragment = new SettingsFragment();
-    fragment.updateInstalledApps(getApplicationContext().getPackageManager());
+    fragment.collectInstalledApps(getApplicationContext().getPackageManager());
 
     // Display the fragment in its designated location.
     getSupportFragmentManager().beginTransaction()
@@ -660,10 +646,8 @@ public class MainActivity extends AppCompatActivity
 
   private void chooseView(int id) {
     View home = findViewById(R.id.frame_main);
-    View report = findViewById(R.id.frame_report);
     View settings = findViewById(R.id.settings);
     home.setVisibility(View.GONE);
-    report.setVisibility(View.GONE);
     settings.setVisibility(View.GONE);
 
     View selected = findViewById(id);
@@ -677,9 +661,6 @@ public class MainActivity extends AppCompatActivity
       case R.id.settings:
         actionBar.setTitle(R.string.settings);
         showSettings();
-        break;
-      case R.id.frame_report:
-        actionBar.setTitle(R.string.feedback);
         break;
     }
 
@@ -710,8 +691,8 @@ public class MainActivity extends AppCompatActivity
   }
 
   private void getIntroApproval() {
-    if (WelcomePopup.shouldShow(this)) {
-      WelcomePopup popup = new WelcomePopup(this);
+    if (IntroDialog.shouldShow(this)) {
+      new IntroDialog().show(getSupportFragmentManager(), "intro");
     }
   }
 }

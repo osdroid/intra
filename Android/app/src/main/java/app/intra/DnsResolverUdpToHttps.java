@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.ProtocolException;
 import java.net.SocketTimeoutException;
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 
 import app.intra.util.BlockedSites;
@@ -104,7 +105,8 @@ class DnsResolverUdpToHttps {
     }
 
     // Writes |dnsRequestId| to |dnsResponse|'s ID header.
-    private void writeRequestIdToDnsResponse(byte[] dnsResponse, short dnsRequestId) {
+    private void writeRequestIdToDnsResponse(byte[] dnsResponse, short dnsRequestId)
+        throws BufferOverflowException {
       ByteBuffer buffer = ByteBuffer.wrap(dnsResponse);
       buffer.putShort(dnsRequestId);
     }
@@ -130,12 +132,11 @@ class DnsResolverUdpToHttps {
       sendResult();
     }
 
-    @Override
-    public void onResponse(Call call, Response response) {
+    // Populate |transaction| from the headers and body of |response|.
+    private void processResponse(Response response) {
       transaction.serverIp = response.header(IpTagInterceptor.HEADER_NAME);
       if (!response.isSuccessful()) {
         transaction.status = DnsTransaction.Status.HTTP_ERROR;
-        sendResult();
         return;
       }
       byte[] dnsResponse;
@@ -143,27 +144,35 @@ class DnsResolverUdpToHttps {
         dnsResponse = response.body().bytes();
       } catch (IOException e) {
         transaction.status = DnsTransaction.Status.BAD_RESPONSE;
-        sendResult();
         return;
       }
       processResponse(dnsResponse);
     }
     private void processResponse(byte[] dnsResponse) {
-      writeRequestIdToDnsResponse(dnsResponse, dnsUdpQuery.requestId);
+      try {
+        writeRequestIdToDnsResponse(dnsResponse, dnsUdpQuery.requestId);
+      } catch (BufferOverflowException e) {
+        FirebaseCrash.logcat(Log.WARN, LOG_TAG, "ID replacement failed");
+        transaction.status = DnsTransaction.Status.BAD_RESPONSE;
+        return;
+      }
       DnsUdpQuery parsedDnsResponse = DnsUdpQuery.fromUdpBody(dnsResponse);
       if (parsedDnsResponse != null) {
         Log.d(LOG_TAG, "RNAME: " + parsedDnsResponse.name + " NAME: " + dnsUdpQuery.name);
         if (!dnsUdpQuery.name.equals(parsedDnsResponse.name)) {
           FirebaseCrash.logcat(Log.ERROR, LOG_TAG, "Mismatch in request and response names.");
           transaction.status = DnsTransaction.Status.BAD_RESPONSE;
-          sendResult();
           return;
         }
       }
 
       transaction.status = DnsTransaction.Status.COMPLETE;
       transaction.response = dnsResponse;
+    }
 
+    @Override
+    public void onResponse(Call call, Response response) {
+      processResponse(response);
       sendResult();
     }
   }

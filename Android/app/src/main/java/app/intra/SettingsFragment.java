@@ -15,21 +15,25 @@ limitations under the License.
 */
 package app.intra;
 
+import com.google.firebase.crash.FirebaseCrash;
+
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
+import androidx.annotation.MainThread;
 import androidx.fragment.app.DialogFragment;
 import androidx.preference.MultiSelectListPreference;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
+import app.intra.util.AppInfo;
 
 /**
  * UI Fragment for displaying user preferences.
@@ -40,68 +44,67 @@ import androidx.preference.PreferenceFragmentCompat;
  */
 
 public class SettingsFragment extends PreferenceFragmentCompat {
-  private static final String LABELS_KEY = "labels";
-  private static final String PACKAGENAMES_KEY = "packageNames";
+  private static final String APPS_KEY = "apps";
 
-  private ArrayList<String> labels = null;
-  private ArrayList<String> packageNames = null;
-  private MultiSelectListPreference apps = null;
+  // Acquiring the list of apps happens asynchronously.  To get the list of apps, use the
+  // getAppList() function, which will wait for the enumeration to complete if necessary.
+  private AppEnumerationTask enumerator = null;
+  private ArrayList<AppInfo> appList = null;
+
+  private MultiSelectListPreference appPref = null;
 
   /**
-   * Custom pair class for labels (human-readable names) and package names (Java-style package
-   * identifiers).  This class's primary purpose is to expose a custom ordering, where entries
-   * are sorted by label (if non-null) before packageName, and Entries with null labels are placed
-   * after those with non-null labels.
+   * Task representing enumeration of the installed apps.  This task populates |labels| and
+   * |packageNames| before completing.  Enumeration typically takes several seconds, so this task
+   * ensures that enumeration starts when the user opens Settings, but only blocks the UI when the
+   * user opens the Excluded Apps dialog.
    */
-  private class Entry implements Comparable<Entry> {
-    public String label;  // Human-readable app name (may be null)
-    public String packageName;  // Java-style package name (non-null)
-
-    Entry(@Nullable String label, @NonNull String packageName) {
-      this.label = label;
-      this.packageName = packageName;
-    }
-
+  private static class AppEnumerationTask extends AsyncTask<PackageManager, Void,
+      ArrayList<AppInfo>> {
     @Override
-    public int compareTo(@NonNull Entry other) {
-      if (label == null) {
-        if (other.label == null) {
-          return packageName.compareTo(other.packageName);
+    protected ArrayList<AppInfo> doInBackground(PackageManager... pms) {
+      PackageManager pm = pms[0];
+      List<ApplicationInfo> infos = pm.getInstalledApplications(0);
+      ArrayList<AppInfo> entries = new ArrayList<>(infos.size());
+      for (ApplicationInfo info : infos) {
+        if ("app.intra".equals(info.packageName)) {
+          // Showing ourselves in the list of apps would be confusing and useless.
+          continue;
         }
-        return -1;
-      } else if (other.label == null) {
-        return 1;
-      } else if (!label.equals(other.label)) {
-        return label.compareTo(other.label);
+        if (pm.getLaunchIntentForPackage(info.packageName) == null) {
+          // This is not an app that can actually be launched, so it's confusing to show it.
+          continue;
+        }
+        // Calling loadLabel() can be very slow, because it needs to read into the APK.
+        entries.add(new AppInfo(info.loadLabel(pm).toString(), info.packageName));
       }
-      return packageName.compareTo(other.packageName);
+      Collections.sort(entries);
+      return entries;
     }
   }
 
   @Override
   public void onSaveInstanceState(Bundle savedInstanceState) {
-    savedInstanceState.putStringArrayList(LABELS_KEY, labels);
-    savedInstanceState.putStringArrayList(PACKAGENAMES_KEY, packageNames);
+    ArrayList<AppInfo> appList = getAppList();
+    if (appList != null) {
+      savedInstanceState.putParcelableArrayList(APPS_KEY, appList);
+    }
   }
 
   @Override
   public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
     if (savedInstanceState != null) {
       // Restore the app list state.
-      labels = savedInstanceState.getStringArrayList(LABELS_KEY);
-      packageNames = savedInstanceState.getStringArrayList(PACKAGENAMES_KEY);
+      appList = savedInstanceState.getParcelableArrayList(APPS_KEY);
     }
 
     // Load the preferences from an XML resource
     addPreferencesFromResource(R.xml.preferences);
-    apps = (MultiSelectListPreference)findPreference(PersistentState.APPS_KEY);
-    // App exclusion relies on VpnService.Builder.addDisallowedApplication, which was added in L.
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-      apps.setEntries(labels.toArray(new String[0]));
-      apps.setEntryValues(packageNames.toArray(new String[0]));
-    } else {
-      apps.setEnabled(false);
-      apps.setSummary(R.string.old_android);
+    appPref = (MultiSelectListPreference)findPreference(PersistentState.APPS_KEY);
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+      // App exclusion relies on VpnService.Builder.addDisallowedApplication, which was added in L.
+      appPref.setEnabled(false);
+      appPref.setSummary(R.string.old_android);
     }
   }
 
@@ -112,6 +115,21 @@ public class SettingsFragment extends PreferenceFragmentCompat {
       dialogFragment.setTargetFragment(this, 0);
       dialogFragment.show(getFragmentManager(), null);
     } else {
+      // This is the app exclusion dialog.
+      final ArrayList<AppInfo> appList = getAppList();
+      if (appList != null) {
+        String[] labels = new String[appList.size()];
+        String[] packageNames = new String[appList.size()];
+        for (int i = 0; i < appList.size(); ++i) {
+          AppInfo entry = appList.get(i);
+          labels[i] = entry.label;
+          packageNames[i] = entry.packageName;
+        }
+
+        appPref.setEntries(labels);
+        appPref.setEntryValues(packageNames);
+      }
+
       super.onDisplayPreferenceDialog(preference);
     }
   }
@@ -121,26 +139,31 @@ public class SettingsFragment extends PreferenceFragmentCompat {
    * method must be called before the fragment is displayed.
    * @param pm The global PackageManager.
    */
-  public void updateInstalledApps(PackageManager pm) {
-    List<ApplicationInfo> infos = pm.getInstalledApplications(0);
-    ArrayList<Entry> entries = new ArrayList<>(infos.size());
-    for (ApplicationInfo info : infos) {
-      if ("app.intra".equals(info.packageName)) {
-        // Showing ourselves in the list of apps would be confusing and useless.
-        continue;
-      }
-      if (pm.getLaunchIntentForPackage(info.packageName) == null) {
-        // This is not an app that can actually be launched, so it's confusing to show it.
-        continue;
-      }
-      entries.add(new Entry(info.loadLabel(pm).toString(), info.packageName));
+  @MainThread
+  void collectInstalledApps(PackageManager pm) {
+    enumerator = new AppEnumerationTask();
+    enumerator.execute(pm);
+  }
+
+  /**
+   * Blocks until the app list is ready.
+   * @return The app list, or null if it could not be generated for any reason.
+   */
+  @MainThread
+  private ArrayList<AppInfo> getAppList() {
+    if (appList != null) {
+      return appList;
     }
-    Collections.sort(entries);
-    labels = new ArrayList<>(entries.size());
-    packageNames = new ArrayList<>(entries.size());
-    for (Entry e : entries) {
-      labels.add(e.label);
-      packageNames.add(e.packageName);
+    if (enumerator != null) {
+      try {
+        appList = enumerator.get();
+      } catch (InterruptedException e) {
+        // Thread was interrupted.  This is probably fine.
+      } catch (ExecutionException e) {
+        // Something bad happened during the async task.
+        FirebaseCrash.report(e);
+      }
     }
+    return appList;
   }
 }

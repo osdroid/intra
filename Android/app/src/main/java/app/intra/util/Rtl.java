@@ -15,13 +15,24 @@ limitations under the License.
 */
 package app.intra.util;
 
-/**
- * This type represents a feedback report.  It's useful to enable clear separation between
- * feedback reports and crashes in Firebase.
- */
-public class Feedback extends Throwable {
+import android.os.Build;
+import android.view.View;
 
-  public Feedback(String message) {
-    super(message);
+import androidx.fragment.app.Fragment;
+
+/**
+ * Utility class for dealing with Right-to-Left locales.
+ */
+public class Rtl {
+  /**
+   * @param fragment The UI element to analyze
+   * @return True if the UI is configured to use a Right-to-Left locale.
+   */
+  public static boolean isRtl(Fragment fragment) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
+      return false;
+    }
+    int layoutDirection = fragment.getResources().getConfiguration().getLayoutDirection();
+    return layoutDirection == View.LAYOUT_DIRECTION_RTL;
   }
 }

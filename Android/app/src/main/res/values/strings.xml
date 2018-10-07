@@ -1,6 +1,44 @@
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
   <string name="app_name" translatable="false">Intra</string>
 
+  <!-- Intro text -->
+  <string name="intro_benefit_headline" description="Headline for intro page describing key benefit">
+    A safer route to a more open internet
+  </string>
+
+  <string name="intro_benefit_body" description="Body text for intro page describing key benefit">
+    When you use the internet, your device needs to look up addresses in an internet contact list. Sometimes your connection can give you the wrong address.
+  </string>
+
+  <string name="intro_manipulation_headline" description="Headline for intro page describing manipulation">
+    Protection from wrong addresses
+  </string>
+
+  <string name="intro_manipulation_body" description="Body text for intro page describing manipulation">
+    Intra protects you from getting bad addresses that lead to dead ends (DNS manipulation) by encrypting your DNS connection.
+  </string>
+
+  <string name="intro_details_headline" description="Headline for intro page describing permissions and privacy">
+    Intra needs to monitor network traffic to enable protection
+  </string>
+
+  <string name="intro_details_body" description="Body text for intro page describing permissions and privacy">
+    Tap OK when you see the conection request to get started. By default, your queries will be routed to Google Public DNS (<a href="https://developers.google.com/speed/public-dns/privacy">Privacy Policy</a>). You can choose another service in the app settings.
+  </string>
+
+  <string name="intro_back" description="Button label to see the previous page of introduction">
+    back
+  </string>
+
+  <string name="intro_next" description="Button label to see the next page of introduction">
+    next
+  </string>
+
+  <string name="intro_accept"
+          description="Button label to acknowledge legal terms and VPN access permission request">
+    accept
+  </string>
+
   <string name="about_headline"
           description="Headline for the welcome screen.">Honest and secure DNS</string>
 
@@ -50,6 +88,11 @@
     Submit Feedback
   </string>
 
+  <string name="support"
+          description="Menu entry that links to documentation and interactive support.">
+    Support
+  </string>
+
   <string name="privacy_link"
           description="Link to the privacy policy.">
     Privacy Policy
@@ -76,71 +119,85 @@
     from DB-IP.com.
   </string>
 
-  <string name="dns_on"
-          description="This is a large message at the top of the main screen.  It says 'Your DNS queries are
-      protected', with the word 'protected' highlighted in a reassuring color.">
-    <![CDATA[Your DNS queries are <font color=\"#%06X\">protected</font>]]>
+  <string name="indicator_on"
+          description="This is a large message at the top of the main screen.">
+    On
   </string>
 
-  <string name="dns_off"
-          description="This is a large message at the top of the main screen.  It says 'Your DNS queries are
-      exposed', with the word 'exposed' highlighted in a scary color.  'exposed' here means both 'visible to untrusted parties' and 'vulnerable to manipulation by untrusted parties'.">
-    <![CDATA[Your DNS queries are <font color=\"#%06X\">exposed</font>]]>
+  <string name="indicator_off"
+          description="This is a large message at the top of the main screen.">
+    Off
   </string>
 
-  <string name="dns_upgraded"
-          description="This is similar to dns_off, but with the word 'exposed' replaced by 'vulnerable'.  This is shown when the user has weak protection that an attacker could disable.">
-    <![CDATA[Your DNS queries are <font color=\"#%06X\">vulnerable</font>]]>
+  <string name="status_exposed"
+          description="This is a large message in a scary color.  It indicates that DNS queries can be surveilled or modified in transit.">
+    Exposed
   </string>
 
-  <string name="dns_strict"
+  <string name="explanation_exposed"
+          description="Expanded form of status_exposed">
+    Your connection is exposed to DNS attacks.
+  </string>
+
+  <string name="status_protected"
+          description="This is a large message in a reassuring color.  It indicates that DNS queries can't be surveilled or modified in transit.">
+    Protected
+  </string>
+
+  <string name="explanation_protected"
+          description="Expanded form of status_protected">
+    Your connection is protected from DNS attacks.
+  </string>
+
+  <string name="status_upgraded"
+          description="This is similar to status_exposed, and indicates weak protection that an attacker could disable.">
+    Vulnerable
+  </string>
+
+  <string name="explanation_upgraded"
+          description="Corresponds to status_upgraded.">
+    Your connection is currently protected by Android Private DNS, but an attacker could disable
+    or undermine this protection.
+  </string>
+
+  <string name="status_strict"
           description="This is similar to dns_on, but the protection is being provided by the operating system, not by Intra.  It is not color-highlighted.">
-    Your DNS queries are protected by Android
+    Protected by Android
   </string>
 
-  <string name="enable_protection"
-          description="This text appears on a button to enable DNS protection functionality.">
-    enable protection
-  </string>
-
-  <string name="disable_protection"
-          description="This text appears on a button to disable DNS protection functionality.">
-    disable
-  </string>
-
-  <string name="starting_protection"
-          description="This text briefly appears on the button while starting.">
-    starting&#8230;
-  </string>
-
-  <string name="vpn_explanation"
-          description="Warning text shown on the main screen before the user starts Intra">
-    Intra has detected another VPN on your device.  If you enable Intra, that VPN will be disabled.
-    Intra is not as secure as a trusted VPN.
-  </string>
-
-  <string name="dns_strict_explanation"
+  <string name="explanation_strict"
           description="Explanation on the main screen for users who have Private DNS strict mode enabled at the OS level.">
     Intra has detected that the Android Private DNS setting is enabled.  This means your DNS
     queries are already protected, so there\'s no need to enable Intra.
   </string>
 
-  <string name="connecting"
-          description="Status indicator shown briefly when establishing a connection">
-    Connecting&#8230;
+  <string name="status_starting"
+          description="This text briefly appears while starting.">
+    Starting&#8230;
   </string>
 
-  <string name="connected" description="Status indicator shown when the connection is working">
-    Connected
+  <string name="explanation_starting"
+          description="Corresponds to status_starting">
+    Hang tight.  Intra is establishing a server connection.
   </string>
 
-  <string name="offline"
+  <string name="status_waiting"
+          description="This text appears during the connection process if Intra needs user permission or the phone is offline.">
+    Waiting&#8230;
+  </string>
+
+  <string name="explanation_offline"
           description="Status indicator shown when there is no network connection.">
-    Offline
+    Your device is offline.  Intra is waiting for a network connection.
   </string>
 
-  <string name="connection_warning"
-          description="Status indicator shown when the most recent query has failed.  Future queries may be likely to fail.">
+  <string name="explanation_vpn"
+          description="Warning text shown on the main screen before the user starts Intra">
+    Intra has detected another VPN on your device.  If you enable Intra, that VPN will be disabled.
+    Intra is not as secure as a trusted VPN.
+  </string>
+
+  <string name="explanation_failing">
     Warning: Queries are failing.  You may want to choose a different server and restart Intra.
   </string>
 
